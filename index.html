@@ -53,6 +53,8 @@
 
   --radius-pill: 100px;
   --radius-card: 8px;
+
+  color-scheme: dark;   /* native popups, scrollbars, form controls */
 }
 
 /* ─── Light mode — cream canvas, deep ink, accents darkened for text legibility ─── */
@@ -80,6 +82,8 @@
   --hero-glow-b: rgba(184, 61, 177, 0.07);
   --cta-fill-start: #08a935;
   --cta-fill-end: #3fa524;
+
+  color-scheme: light;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -611,6 +615,72 @@ a:focus-visible, button:focus-visible {
 
 .quiz-step { margin-bottom: 32px; }
 
+/* ─── Verb filter dropdown ─── */
+.quiz-filter-label {
+  display: block;
+  font-size: 16px;
+  color: var(--color-surface-cream);
+  margin-bottom: 12px;
+  letter-spacing: -0.01em;
+}
+.quiz-filter-label .optional {
+  color: var(--color-surface-50);
+}
+
+.select-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 340px;
+  width: 100%;
+}
+/* Chevron — drawn in CSS so it inherits currentColor in both themes */
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--select-accent, var(--color-surface-cream));
+  border-bottom: 1.5px solid var(--select-accent, var(--color-surface-cream));
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+  transition: border-color 0.2s ease;
+}
+
+.verb-select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: 1px solid var(--color-surface-25);
+  border-radius: var(--radius-pill);
+  padding: 15px 48px 15px 24px;
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--select-accent, var(--color-surface-cream));
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+.verb-select:hover { border-color: var(--color-surface-cream); }
+.verb-select:focus-visible { border-color: var(--color-surface-cream); }
+/* Native popup list — explicit colors for browsers that don't inherit */
+.verb-select option {
+  background: var(--color-off-black);
+  color: var(--color-surface-cream);
+  font-weight: 400;
+}
+
+.quiz-filter-hint {
+  font-size: 14px;
+  color: var(--color-surface-50);
+  line-height: 1.5;
+  margin-top: 12px;
+}
+
 .quiz-prompt {
   border-top: 1px solid var(--color-surface-25);
   border-bottom: 1px solid var(--color-surface-25);
@@ -829,6 +899,8 @@ a:focus-visible, button:focus-visible {
   .quiz-verdict { padding: 24px; }
   .quiz-input { font-size: 18px; padding: 16px 20px; }
   .quiz-actions .btn-pill { width: 100%; text-align: center; }
+  .select-wrap { max-width: none; }
+  .verb-select { font-size: 17px; padding: 14px 44px 14px 20px; }
 }
 
 /* ─── Reduced motion ─── */
@@ -3269,10 +3341,23 @@ a:focus-visible, button:focus-visible {
   <h2 class="quiz-heading">Ponte a prueba. <span>Traduce.</span></h2>
   <p class="quiz-lede">
     Generate an English sentence, then write it in Spanish using the verb it's built on.
-    Every sentence comes from the seven verbs above.
+    Every sentence comes from the nineteen verbs above — pick one to drill it, or leave it
+    open and take them all.
   </p>
 
   <div class="quiz-panel">
+    <div class="quiz-step">
+      <label class="quiz-filter-label" for="verb-filter">
+        Practise a verb <span class="optional">— optional</span>
+      </label>
+      <div class="select-wrap" id="select-wrap">
+        <select class="verb-select" id="verb-filter">
+          <option value="">All verbs</option>
+        </select>
+      </div>
+      <p class="quiz-filter-hint" id="filter-hint">Drawing from all 278 sentences.</p>
+    </div>
+
     <div class="quiz-step">
       <button class="btn-cta" id="generate-btn" type="button">Generate sentence</button>
     </div>
@@ -5892,6 +5977,9 @@ const BANK = [
 
 // ── Elements ──
 const generateBtn  = document.getElementById('generate-btn');
+const verbFilter   = document.getElementById('verb-filter');
+const selectWrap   = document.getElementById('select-wrap');
+const filterHint   = document.getElementById('filter-hint');
 const submitBtn    = document.getElementById('submit-btn');
 const clearBtn     = document.getElementById('clear-btn');
 const answerInput  = document.getElementById('answer-input');
@@ -5939,17 +6027,72 @@ function isCorrect(input, item) {
   return accepted.some(a => a === given || stripPronoun(a) === stripPronoun(given));
 }
 
+// ── Verb filter ──
+// Options are built from the bank itself, in the page's section order,
+// so the list can never drift out of sync with the content.
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+function countFor(verb) {
+  return BANK.reduce((n, item) => n + (item.verb === verb ? 1 : 0), 0);
+}
+
+if (verbFilter) {
+  Object.keys(VERB_COLORS).forEach(verb => {
+    const n = countFor(verb);
+    if (!n) return;                       // skip any verb with no sentences
+    const opt = document.createElement('option');
+    opt.value = verb;
+    opt.textContent = `${cap(verb)} (${n})`;
+    verbFilter.appendChild(opt);
+  });
+}
+
+// Indices of the sentences currently in play
+function currentPool() {
+  const v = verbFilter ? verbFilter.value : '';
+  const pool = [];
+  for (let i = 0; i < BANK.length; i++) {
+    if (!v || BANK[i].verb === v) pool.push(i);
+  }
+  return pool;
+}
+
+function updateFilterUI() {
+  const v = verbFilter ? verbFilter.value : '';
+  const n = currentPool().length;
+
+  // Tint the control with the verb's own accent — colour as taxonomy
+  if (v && VERB_COLORS[v]) {
+    selectWrap.style.setProperty('--select-accent', VERB_COLORS[v]);
+  } else {
+    selectWrap.style.removeProperty('--select-accent');
+  }
+
+  filterHint.textContent = v
+    ? `Drawing from ${n} ${cap(v)} sentence${n === 1 ? '' : 's'}.`
+    : `Drawing from all ${n} sentences.`;
+}
+
+if (verbFilter) {
+  verbFilter.addEventListener('change', () => {
+    recentIndices = [];        // pool changed — start its history fresh
+    updateFilterUI();
+  });
+  updateFilterUI();
+}
+
 function pickSentence() {
-  // Avoid repeating the last third of the bank
-  const memory = Math.floor(BANK.length / 3);
-  let idx;
-  let guard = 0;
-  do {
-    idx = Math.floor(Math.random() * BANK.length);
-    guard++;
-  } while (recentIndices.includes(idx) && guard < 60);
+  const pool = currentPool();
+  if (!pool.length) return null;
+
+  // Don't repeat until roughly a third of the pool has been seen
+  const memory = Math.max(1, Math.floor(pool.length / 3));
+  let candidates = pool.filter(i => !recentIndices.includes(i));
+  if (!candidates.length) candidates = pool;   // small pool — allow reuse
+
+  const idx = candidates[Math.floor(Math.random() * candidates.length)];
   recentIndices.push(idx);
-  if (recentIndices.length > memory) recentIndices.shift();
+  while (recentIndices.length > memory) recentIndices.shift();
   return BANK[idx];
 }
 
@@ -5959,13 +6102,14 @@ function updateScore() {
 
 // ── Generate ──
 generateBtn.addEventListener('click', () => {
-  current = pickSentence();
+  const next = pickSentence();
+  if (!next) return;              // no sentences match the filter
+  current = next;
 
   const accent = VERB_COLORS[current.verb] || 'var(--color-surface-cream)';
   promptBlock.style.setProperty('--quiz-accent', accent);
 
-  const verbName = current.verb.charAt(0).toUpperCase() + current.verb.slice(1);
-  promptMeta.innerHTML = `{ <span class="verb-tag">${verbName}</span> · ${current.tense} }`;
+  promptMeta.innerHTML = `{ <span class="verb-tag">${cap(current.verb)}</span> · ${current.tense} }`;
   promptText.textContent = current.en;
   promptText.classList.remove('placeholder');
 
@@ -6026,6 +6170,11 @@ clearBtn.addEventListener('click', () => {
   attempts = 0;
   correct = 0;
   updateScore();
+
+  if (verbFilter) {
+    verbFilter.value = '';        // back to the full bank
+    updateFilterUI();
+  }
 
   promptBlock.style.removeProperty('--quiz-accent');
   promptMeta.textContent = 'No sentence yet';
